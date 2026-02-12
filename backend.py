@@ -3,9 +3,14 @@ import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
+from dotenv import load_dotenv 
+
 
 app = Flask(__name__)
 CORS(app)
+
+load_dotenv()
+
 
 # ── API Key: env var first, then api.txt fallback ──
 API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
