@@ -1,31 +1,27 @@
 import os
+import sys
 import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from groq import Groq
-from dotenv import load_dotenv 
 
+# Load .env file if present (for local dev)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 app = Flask(__name__)
 CORS(app)
 
-load_dotenv()
-
-
-# ── API Key: env var first, then api.txt fallback ──
+# ── API Key from environment variable ──
 API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 if not API_KEY:
-    api_file = os.path.join(os.path.dirname(__file__), "api.txt")
-    if os.path.exists(api_file):
-        with open(api_file, "r") as f:
-            API_KEY = f.read().strip()
-
-if not API_KEY:
-    raise RuntimeError(
-        "BlastShield: No API key found. "
-        "Set GROQ_API_KEY env var or create api.txt."
-    )
+    print("ERROR: GROQ_API_KEY environment variable is not set.")
+    print("Set it with: export GROQ_API_KEY=your_key_here")
+    sys.exit(1)
 
 client = Groq(api_key=API_KEY)
 
