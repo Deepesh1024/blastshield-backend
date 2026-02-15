@@ -8,7 +8,7 @@ No LLM involvement — pure deterministic analysis.
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 from app.models.ast_models import ModuleAST
 from app.models.graph_models import CallGraph
@@ -18,8 +18,12 @@ from app.models.rule_models import RuleResult, RuleViolation
 from app.core.rules import (
     blocking_io_in_async,
     dangerous_eval,
+    db_conn_per_request,
     missing_await,
     missing_exception_boundary,
+    missing_http_timeout,
+    missing_idempotency,
+    partial_txn_no_rollback,
     race_condition,
     retry_without_backoff,
     shared_mutable_state,
@@ -27,7 +31,7 @@ from app.core.rules import (
 )
 
 # Type for a rule check function
-RuleCheckFn = Callable[[ModuleAST, CallGraph | None], list[RuleViolation]]
+RuleCheckFn = Callable[[ModuleAST, Optional[CallGraph]], list[RuleViolation]]
 
 # Registry of all deterministic rules
 RULE_REGISTRY: dict[str, RuleCheckFn] = {
@@ -39,6 +43,10 @@ RULE_REGISTRY: dict[str, RuleCheckFn] = {
     missing_exception_boundary.RULE_ID: missing_exception_boundary.check,
     retry_without_backoff.RULE_ID: retry_without_backoff.check,
     blocking_io_in_async.RULE_ID: blocking_io_in_async.check,
+    db_conn_per_request.RULE_ID: db_conn_per_request.check,
+    missing_idempotency.RULE_ID: missing_idempotency.check,
+    partial_txn_no_rollback.RULE_ID: partial_txn_no_rollback.check,
+    missing_http_timeout.RULE_ID: missing_http_timeout.check,
 }
 
 

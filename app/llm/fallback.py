@@ -79,6 +79,38 @@ RULE_TEMPLATES: dict[str, dict[str, str]] = {
         ),
         "patch_hint": "Use async equivalents: asyncio.sleep(), httpx.AsyncClient, aiofiles.open(), asyncio.create_subprocess_exec().",
     },
+    "db_conn_per_request": {
+        "risk": (
+            "Creating a new database connection for every request causes connection pool "
+            "exhaustion under load. Connection establishment is expensive (TCP handshake, "
+            "auth, TLS negotiation) and databases have connection limits."
+        ),
+        "patch_hint": "Use a connection pool: sqlalchemy.create_engine(pool_size=10), psycopg2.pool, or framework-provided pool.",
+    },
+    "missing_idempotency": {
+        "risk": (
+            "Non-idempotent write handlers cause duplicate records, double-charges, and "
+            "data corruption when clients retry on timeout or network failure. This is "
+            "especially dangerous for payment and order creation endpoints."
+        ),
+        "patch_hint": "Accept an Idempotency-Key header, check for prior execution, and return cached response on duplicate.",
+    },
+    "partial_txn_no_rollback": {
+        "risk": (
+            "DB operations without try/except + rollback leave partial transactions on failure. "
+            "This corrupts data consistency, leaks DB connections, and can cause cascading "
+            "failures in downstream systems."
+        ),
+        "patch_hint": "Wrap DB operations in try/except with rollback in except, or use a context manager (with conn:).",
+    },
+    "missing_http_timeout": {
+        "risk": (
+            "HTTP calls without a timeout will hang indefinitely if the remote server "
+            "doesn't respond. This blocks threads/coroutines and eventually exhausts "
+            "the process's resources, causing service unavailability."
+        ),
+        "patch_hint": "Add timeout=10 (or appropriate value) to all HTTP client calls.",
+    },
 }
 
 DEFAULT_TEMPLATE = {

@@ -66,6 +66,21 @@ class Settings(BaseSettings):
         default="audit.jsonl", description="Path to JSON-lines audit log file"
     )
 
+    # ── Patch Engine ──
+    patch_max_retries: int = Field(
+        default=2, description="Max LLM self-correction retries for patch generation"
+    )
+    patch_review_enabled: bool = Field(
+        default=True, description="Enable multi-pass LLM review of generated patches"
+    )
+    forbidden_imports: list[str] = Field(
+        default=[
+            "os.system", "subprocess", "eval", "exec",
+            "compile", "__import__", "importlib", "ctypes", "pickle",
+        ],
+        description="Imports banned in LLM-generated patches",
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

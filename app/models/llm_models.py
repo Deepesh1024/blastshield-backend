@@ -52,3 +52,41 @@ class LLMPromptContext(BaseModel):
     file_paths: list[str] = Field(
         default_factory=list, description="Whitelist of valid file paths"
     )
+
+
+class LLMPatchOutput(BaseModel):
+    """Strict JSON output schema for LLM patch generation."""
+
+    type: str = Field(
+        default="replace_function",
+        description="Patch type: 'replace_function'",
+    )
+    target: str = Field(..., description="Target function name")
+    new_code: str = Field(..., description="Replacement function code")
+
+
+class LLMPatchGeneration(BaseModel):
+    """Full LLM patch generation response — strict schema."""
+
+    explanation: str = Field(..., description="Why this patch fixes the issue")
+    patch: LLMPatchOutput = Field(..., description="The patch to apply")
+    risk_score_after: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        description="Estimated risk score after applying patch",
+    )
+
+
+class LLMReviewVerdict(BaseModel):
+    """LLM's verdict when reviewing its own patch."""
+
+    safe: bool = Field(..., description="Whether the patch is safe to apply")
+    issues: list[str] = Field(
+        default_factory=list,
+        description="Issues found in the patch",
+    )
+    recommendation: str = Field(
+        default="apply",
+        description="'apply', 'regenerate', or 'reject'",
+    )

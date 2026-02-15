@@ -63,7 +63,7 @@ def test_all_rules_executed(sample_python_code):
     module_ast = parse_python(sample_python_code, "test.py")
     engine = RuleEngine()
     result = engine.run({"test.py": module_ast})
-    assert len(result.rules_executed) == 8
+    assert len(result.rules_executed) == 12
     assert "dangerous_eval" in result.rules_executed
     assert "missing_await" in result.rules_executed
     assert "unsanitized_io" in result.rules_executed

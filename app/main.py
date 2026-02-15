@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, pr_scan, scan
+from app.api.routes import health, patch_route, pr_scan, scan
 from app.config import settings
 
 # Configure logging
@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"   LLM threshold: risk > {settings.llm_risk_threshold}")
     logger.info(f"   Test harness: {'enabled' if settings.test_harness_enabled else 'disabled'}")
     logger.info(f"   Cache TTL: {settings.cache_ttl_seconds}s")
+    logger.info(f"   Patch retries: {settings.patch_max_retries}")
+    logger.info(f"   Patch review: {'enabled' if settings.patch_review_enabled else 'disabled'}")
     yield
     logger.info("🛡️  BlastShield shutting down")
 
@@ -56,3 +58,4 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(scan.router)
 app.include_router(pr_scan.router)
+app.include_router(patch_route.router)
