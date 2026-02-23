@@ -2,6 +2,8 @@
 
 > **v2.0.0** — Deterministic-first, AI-assisted code risk analysis API.
 
+check it out at : http://blastshield.duckdns.org/
+
 BlastShield scans entire codebases and PR diffs for deployment-breaking risks — security vulnerabilities, concurrency bugs, unsafe I/O, missing error boundaries, and more. It returns **structured, actionable results** with severity ratings, explainable risk scores, evidence chains, and auto-generated patches.
 
 ---
