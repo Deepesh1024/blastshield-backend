@@ -1,1 +1,1 @@
-# BlastShield API Routes
+"""BlastShield API route modules."""

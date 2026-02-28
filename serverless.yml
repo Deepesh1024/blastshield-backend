@@ -1,0 +1,53 @@
+service: blastshield
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: us-east-1
+  memorySize: 512
+  timeout: 30
+  architecture: x86_64
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - bedrock:InvokeModel
+          Resource: "arn:aws:bedrock:*::foundation-model/anthropic.*"
+
+package:
+  individually: false
+  patterns:
+    - "!.git/**"
+    - "!.pytest_cache/**"
+    - "!tests/**"
+    - "!venv/**"
+    - "!.venv/**"
+    - "!__pycache__/**"
+    - "!node_modules/**"
+    - "!.serverless/**"
+    - "!*.md"
+    - "!.env"
+    - "!.env.example"
+    - "!audit.jsonl"
+    - "!backend.py"
+
+functions:
+  api:
+    handler: handler.handler
+    events:
+      - httpApi:
+          path: /scan
+          method: post
+      - httpApi:
+          path: /health
+          method: get
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: true
+    slim: true
+    strip: false

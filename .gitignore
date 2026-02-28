@@ -19,3 +19,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Serverless
+node_modules/
+.serverless/

@@ -1,21 +1,23 @@
 """
-BlastShield FastAPI Application — Main entry point.
+BlastShield FastAPI Application — Minimal hackathon prototype.
 
-Replaces the legacy Flask backend.py with a production-grade async application.
+Single-endpoint Python code scanner:
+  POST /scan   → detect infinite loops, score risk, AI explanation + patch
+  GET  /health → {"status": "ok"}
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, patch_route, pr_scan, scan
-from app.config import settings
+from app.api.routes.scan import router as scan_router
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -23,39 +25,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("blastshield")
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan: startup and shutdown hooks."""
-    logger.info("🛡️  BlastShield v2.0.0 starting")
-    logger.info(f"   Model: {settings.blastshield_model}")
-    logger.info(f"   LLM threshold: risk > {settings.llm_risk_threshold}")
-    logger.info(f"   Test harness: {'enabled' if settings.test_harness_enabled else 'disabled'}")
-    logger.info(f"   Cache TTL: {settings.cache_ttl_seconds}s")
-    logger.info(f"   Patch retries: {settings.patch_max_retries}")
-    logger.info(f"   Patch review: {'enabled' if settings.patch_review_enabled else 'disabled'}")
-    yield
-    logger.info("🛡️  BlastShield shutting down")
-
-
 app = FastAPI(
     title="BlastShield",
-    description="Production-grade AI-assisted deployment safety engine",
-    version="2.0.0",
-    lifespan=lifespan,
+    description="AI-powered Python code scanner — infinite loop detection",
+    version="1.0.0",
 )
 
-# CORS
+# CORS — permissive for hackathon demo
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Register routes
-app.include_router(health.router)
-app.include_router(scan.router)
-app.include_router(pr_scan.router)
-app.include_router(patch_route.router)
+# Register scan route
+app.include_router(scan_router)
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "ok"}

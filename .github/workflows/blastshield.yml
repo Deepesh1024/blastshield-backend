@@ -1,0 +1,100 @@
+name: BlastShield Scan
+
+on:
+  pull_request:
+    paths:
+      - '**/*.py'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed Python files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py')
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          if [ -z "$FILES" ]; then echo "empty=true" >> $GITHUB_OUTPUT; else echo "empty=false" >> $GITHUB_OUTPUT; fi
+
+      - name: Scan files
+        if: steps.changed.outputs.empty == 'false'
+        env:
+          BLASTSHIELD_API: ${{ secrets.BLASTSHIELD_API_URL }}
+        run: |
+          REPORT=""
+          TOTAL_RISK=0
+          FILE_COUNT=0
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+            FILE_COUNT=$((FILE_COUNT + 1))
+
+            CODE=$(cat "$file")
+            BODY=$(jq -n --arg code "$CODE" '{"code": $code}')
+
+            RESPONSE=$(curl -s -X POST "${BLASTSHIELD_API}/scan" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" --max-time 30) || RESPONSE='{"risk_score":0,"risks":[],"explanation":"Scan timed out","suggested_patch":""}'
+
+            SCORE=$(echo "$RESPONSE" | jq -r '.risk_score // 0')
+            TOTAL_RISK=$((TOTAL_RISK + SCORE))
+            RISKS=$(echo "$RESPONSE" | jq -r '.risks | length')
+            EXPLANATION=$(echo "$RESPONSE" | jq -r '.explanation // "No issues"')
+
+            if [ "$SCORE" -gt 0 ]; then
+              REPORT="${REPORT}
+          ### ⚠️ \`${file}\` — Risk Score: ${SCORE}/100
+
+          **Risks found:** ${RISKS}
+
+          **Explanation:**
+          ${EXPLANATION}
+
+          <details>
+          <summary>Suggested Patch</summary>
+
+          \`\`\`diff
+          $(echo "$RESPONSE" | jq -r '.suggested_patch // ""')
+          \`\`\`
+          </details>
+          "
+            else
+              REPORT="${REPORT}
+          ### ✅ \`${file}\` — Clean
+          "
+            fi
+          done <<< "${{ steps.changed.outputs.files }}"
+
+          AVG_RISK=$((TOTAL_RISK / (FILE_COUNT > 0 ? FILE_COUNT : 1)))
+          if [ "$AVG_RISK" -ge 50 ]; then BADGE="🔴"; elif [ "$AVG_RISK" -ge 25 ]; then BADGE="🟡"; else BADGE="🟢"; fi
+
+          COMMENT="## 🛡️ BlastShield Scan Report ${BADGE}
+
+          **Files scanned:** ${FILE_COUNT} | **Average risk:** ${AVG_RISK}/100
+
+          ---
+          ${REPORT}"
+
+          echo "comment<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        id: scan
+
+      - name: Comment on PR
+        if: steps.changed.outputs.empty == 'false'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.scan.outputs.comment }}

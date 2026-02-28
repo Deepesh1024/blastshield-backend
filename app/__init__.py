@@ -1,1 +1,1 @@
-# BlastShield Backend — Production-Grade Deployment Safety Engine
+"""BlastShield — AI-powered Python code scanner."""

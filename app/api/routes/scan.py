@@ -1,11 +1,8 @@
 """
-Scan Route — POST /scan
+BlastShield — POST /scan endpoint.
 
-Full project scan endpoint. Accepts a list of files, runs the full
-deterministic pipeline, optionally invokes LLM, and returns structured results.
-
-For small projects (≤10 files): runs inline and returns immediately.
-For larger projects: queues to background and returns scan_id for polling.
+Accepts {"code": str}, parses with tree-sitter, detects infinite loops,
+scores the risk, and enriches with Bedrock AI explanation + patch.
 """
 
 from __future__ import annotations
@@ -13,108 +10,106 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
-from app.api.dependencies import get_audit_logger, get_scan_worker
-from app.audit.logger import AuditLogger
-from app.config import settings
-from app.models.scan_models import (
-    FileInput,
-    ScanRequest,
-    ScanResponse,
-    ScanStatusResponse,
-)
-from app.workers.scan_worker import ScanWorker
+from app.ai.bedrock import get_bedrock_client
+from app.ai.explainer import FALLBACK_EXPLANATION, generate_explanation
+from app.ai.patcher import generate_patch
+from app.core.parser import PythonParser
+from app.core.rules.infinite_loop import detect_infinite_loops
+from app.core.scorer import calculate_score
 
-logger = logging.getLogger("blastshield.api.scan")
-
+logger = logging.getLogger("blastshield.scan")
 router = APIRouter()
 
-# In-memory background scan store
-_background_scans: dict[str, ScanResponse | None] = {}
-_background_status: dict[str, str] = {}
+# Max input size: 50 KB
+MAX_CODE_LENGTH = 50_000
+
+# Shared singleton — created once per Lambda cold start
+_parser = PythonParser()
+
+
+class ScanRequest(BaseModel):
+    code: str = Field(..., min_length=1, description="Python source code to scan")
+
+
+class ScanResponse(BaseModel):
+    risk_score: int
+    risks: list[dict]
+    explanation: str
+    suggested_patch: str
+
+
+_SAFE_FALLBACK = ScanResponse(
+    risk_score=0,
+    risks=[],
+    explanation="Scan failed safely.",
+    suggested_patch="",
+)
 
 
 @router.post("/scan", response_model=ScanResponse)
-async def scan(
-    request: ScanRequest,
-    worker: ScanWorker = Depends(get_scan_worker),
-    audit: AuditLogger = Depends(get_audit_logger),
-):
-    """
-    Full project scan.
+async def scan_code(req: ScanRequest):
+    """Scan Python code for infinite loop risks."""
+    try:
+        # Input size guard
+        if len(req.code) > MAX_CODE_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Code exceeds maximum length of {MAX_CODE_LENGTH} characters",
+            )
 
-    - ≤ background_file_threshold files: runs inline, returns full response
-    - > threshold: queues to background, returns scan_id for polling
-    """
-    # Legacy compatibility: accept 'combined' field
-    files = request.files
-    if not files and request.combined:
-        files = [FileInput(path="unknown", content=request.combined)]
+        # Parse
+        try:
+            tree, source_bytes = _parser.parse(req.code)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail="Could not parse the provided Python code",
+            )
 
-    if not files:
+        # Detect
+        risks = detect_infinite_loops(tree, source_bytes)
+        risk_score = calculate_score(risks)
+
+        # No risks → clean result
+        if not risks:
+            return ScanResponse(
+                risk_score=0,
+                risks=[],
+                explanation="No infinite loop risks detected. Code looks safe.",
+                suggested_patch="",
+            )
+
+        # Enrich with Bedrock AI
+        try:
+            client = get_bedrock_client()
+            lines = req.code.splitlines()
+            first = risks[0]
+            snippet_lines = lines[first["line_start"] - 1 : first["line_end"]]
+            snippet = "\n".join(snippet_lines)
+
+            explanation, patch = await asyncio.gather(
+                generate_explanation(client, first, snippet),
+                generate_patch(client, first, req.code),
+            )
+        except Exception:
+            logger.warning("Bedrock unavailable — using fallback", exc_info=True)
+            explanation = FALLBACK_EXPLANATION
+            # Still guarantee a non-empty patch via static fallback
+            from app.ai.patcher import _get_static_patch
+            patch = _get_static_patch(first)
+
         return ScanResponse(
-            message="error",
-            report=None,
+            risk_score=risk_score,
+            risks=risks,
+            explanation=explanation,
+            suggested_patch=patch,
         )
 
-    # Filter oversized files
-    files = [
-        f for f in files
-        if len(f.content.encode("utf-8")) <= settings.max_file_size_bytes
-    ]
-
-    if len(files) > settings.background_file_threshold:
-        # Queue to background
-        scan_id = f"bg-{id(files) % 100000:05d}"
-        _background_scans[scan_id] = None
-        _background_status[scan_id] = "running"
-
-        async def _run_background():
-            try:
-                result = await worker.run_scan(files, scan_mode="full")
-                result.scan_id = scan_id
-                _background_scans[scan_id] = result
-                _background_status[scan_id] = "complete"
-                if result.report and result.report.audit:
-                    audit.log(result.report.audit)
-            except Exception as e:
-                logger.error(f"Background scan {scan_id} failed: {e}")
-                _background_status[scan_id] = "failed"
-
-        asyncio.create_task(_run_background())
-
-        return ScanResponse(
-            message="scan_queued",
-            scan_id=scan_id,
-        )
-
-    # Inline scan
-    response = await worker.run_scan(files, scan_mode="full")
-
-    # Audit log
-    if response.report and response.report.audit:
-        audit.log(response.report.audit)
-
-    return response
-
-
-@router.get("/scan/{scan_id}/status", response_model=ScanStatusResponse)
-async def scan_status(scan_id: str):
-    """Poll the status of a background scan."""
-    status = _background_status.get(scan_id, "not_found")
-
-    if status == "not_found":
-        return ScanStatusResponse(
-            scan_id=scan_id,
-            status="failed",
-            error="Scan not found",
-        )
-
-    result = _background_scans.get(scan_id)
-    return ScanStatusResponse(
-        scan_id=scan_id,
-        status=status,
-        progress=1.0 if status == "complete" else 0.5,
-        report=result.report if result else None,
-    )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unexpected scan error")
+        return _SAFE_FALLBACK

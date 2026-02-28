@@ -1,1 +1,1 @@
-# BlastShield Deterministic Core (Layer 1)
+"""BlastShield core analysis modules."""
