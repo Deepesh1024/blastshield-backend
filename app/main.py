@@ -43,6 +43,19 @@ app.add_middleware(
 # Register scan route
 app.include_router(scan_router)
 
+from fastapi.exceptions import RequestValidationError
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = await request.body()
+    logger.error(f"Validation Error. Raw body: {body.decode('utf-8')[:500]} | Errors: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": body.decode("utf-8")[:100]},
+    )
+
 
 @app.get("/health")
 async def health():

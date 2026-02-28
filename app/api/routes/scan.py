@@ -31,7 +31,7 @@ _parser = PythonParser()
 
 
 class ScanRequest(BaseModel):
-    code: str = Field(..., min_length=1, description="Python source code to scan")
+    code: str = Field(..., description="Python source code to scan")
 
 
 class ScanResponse(BaseModel):
@@ -53,6 +53,15 @@ _SAFE_FALLBACK = ScanResponse(
 async def scan_code(req: ScanRequest):
     """Scan Python code for infinite loop risks."""
     try:
+        # Early exit for empty files (e.g., __init__.py)
+        if not req.code.strip():
+            return ScanResponse(
+                risk_score=0,
+                risks=[],
+                explanation="File is empty. No risks detected.",
+                suggested_patch="",
+            )
+
         # Input size guard
         if len(req.code) > MAX_CODE_LENGTH:
             raise HTTPException(
@@ -64,9 +73,11 @@ async def scan_code(req: ScanRequest):
         try:
             tree, source_bytes = _parser.parse(req.code)
         except ValueError:
-            raise HTTPException(
-                status_code=422,
-                detail="Could not parse the provided Python code",
+            return ScanResponse(
+                risk_score=0,
+                risks=[],
+                explanation="Syntax error: Could not parse this Python file.",
+                suggested_patch="",
             )
 
         # Detect
