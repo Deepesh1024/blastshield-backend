@@ -68,10 +68,13 @@ uvicorn app.main:app --reload --port 8000
 
 ## API Reference
 
+**Base URL (Local):** `http://localhost:8000`  
+**Base URL (Live):** `https://<api-id>.execute-api.us-east-1.amazonaws.com`
+
 ### `GET /health`
 
 ```bash
-curl http://localhost:8000/health
+curl <BASE_URL>/health
 # → {"status": "ok"}
 ```
 
@@ -79,7 +82,7 @@ curl http://localhost:8000/health
 
 **Request:**
 ```bash
-curl -X POST http://localhost:8000/scan \
+curl -X POST <BASE_URL>/scan \
   -H "Content-Type: application/json" \
   -d '{
     "code": "import time\n\ndef worker():\n    while True:\n        time.sleep(1)\n        print(\"working...\")\n\nworker()"
