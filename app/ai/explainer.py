@@ -1,5 +1,5 @@
 """
-BlastShield — AI-powered risk explanation via Bedrock.
+BlastShield — AI-powered risk explanation via Bedrock Claude.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import logging
 
 logger = logging.getLogger("blastshield.explainer")
 
-MODEL_ID = "us.amazon.nova-lite-v1:0"
+MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 FALLBACK_EXPLANATION = (
     "Potential infinite loop detected. This can cause CPU exhaustion and "
@@ -22,7 +22,7 @@ FALLBACK_EXPLANATION = (
 
 
 async def generate_explanation(client, risk: dict, code_snippet: str) -> str:
-    """Ask Bedrock to explain a detected risk in simple English.
+    """Ask Bedrock Claude to explain a detected risk in simple English.
 
     Returns a static fallback string if Bedrock is unavailable or errors.
     """
@@ -38,17 +38,17 @@ async def generate_explanation(client, risk: dict, code_snippet: str) -> str:
 
     try:
         body = json.dumps({
-            "messages": [{"role": "user", "content": [{"text": prompt}]}],
-            "inferenceConfig": {"maxTokens": 300, "temperature": 0.5},
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 300,
+            "temperature": 0.5,
+            "messages": [{"role": "user", "content": prompt}],
         })
 
         response = client.invoke_model(modelId=MODEL_ID, body=body)
         raw = response["body"].read()
         result = json.loads(raw)
-        logger.info("Bedrock explanation response keys: %s", list(result.keys()))
-
-        # Amazon Nova format: result.output.message.content[0].text
-        text = result["output"]["message"]["content"][0]["text"].strip()
+        logger.info("Bedrock explanation response received")
+        text = result["content"][0]["text"].strip()
         return text if text else FALLBACK_EXPLANATION
 
     except Exception:

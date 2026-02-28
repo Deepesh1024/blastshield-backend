@@ -1,0 +1,43 @@
+name: BlastShield PR Scan
+
+on:
+  pull_request:
+    paths: ['**/*.py']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Get changed .py files
+        id: files
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' | head -20)
+          echo "list<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Scan & comment
+        if: steps.files.outputs.list != ''
+        env:
+          API: ${{ secrets.BLASTSHIELD_API_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY="## 🛡️ BlastShield Scan\n"
+          while IFS= read -r f; do
+            [ -z "$f" ] || [ ! -f "$f" ] && continue
+            R=$(curl -s --max-time 30 -X POST "$API/scan" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg c "$(cat "$f")" '{code:$c}')")
+            S=$(echo "$R"|jq -r '.risk_score//0')
+            if [ "$S" -gt 0 ]; then
+              BODY+="⚠️ \`$f\` risk=$S\n$(echo "$R"|jq -r '.explanation//"–"')\n\n"
+            else BODY+="✅ \`$f\`\n"; fi
+          done <<< "${{ steps.files.outputs.list }}"
+          gh pr comment ${{ github.event.pull_request.number }} --body "$(echo -e "$BODY")"

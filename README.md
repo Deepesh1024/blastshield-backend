@@ -1,6 +1,6 @@
 # BlastShield 🛡️
 
-**AI-powered Python code scanner** — detects infinite loop risks using tree-sitter AST analysis and generates explanations + patches via AWS Bedrock (Amazon Nova Lite).
+**AI-powered Python code scanner** — detects infinite loop risks using tree-sitter AST analysis and generates explanations + patches via AWS Bedrock (Claude 3.5 Sonnet).
 
 Built for the **AWS AI for Bharat Hackathon** (Round 2).
 
@@ -9,7 +9,7 @@ Built for the **AWS AI for Bharat Hackathon** (Round 2).
 ```
 POST /scan  →  tree-sitter parse  →  infinite loop detection  →  risk score
                                                                       ↓
-                                                              AWS Bedrock AI
+                                                              AWS Bedrock Claude
                                                                       ↓
                                                           explanation + patch
                                                                       ↓
@@ -24,7 +24,7 @@ blastshield-backend/
 │   ├── main.py                  # FastAPI app (/scan + /health)
 │   ├── ai/
 │   │   ├── bedrock.py            # Bedrock client (bearer token + IAM)
-│   │   ├── explainer.py          # AI risk explanation
+│   │   ├── explainer.py          # AI risk explanation (Claude 3.5 Sonnet)
 │   │   └── patcher.py            # AI patch generation (guaranteed non-empty)
 │   ├── api/routes/
 │   │   └── scan.py               # POST /scan endpoint
@@ -34,7 +34,7 @@ blastshield-backend/
 │       └── rules/
 │           └── infinite_loop.py   # Infinite loop detection
 ├── .github/workflows/
-│   └── blastshield.yml           # GitHub Actions PR scanner
+│   └── pr-scan.yml               # GitHub Actions PR scanner
 ├── handler.py                    # Mangum Lambda wrapper
 ├── serverless.yml                # Serverless Framework config
 ├── requirements.txt
@@ -46,7 +46,7 @@ blastshield-backend/
 ### Prerequisites
 
 - Python 3.11+
-- AWS Bedrock access (bearer token or IAM credentials)
+- AWS credentials with `bedrock:InvokeModel` permission
 
 ### Setup
 
@@ -57,7 +57,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env with your AWS credentials
+# Edit .env — add your AWS credentials or Bedrock bearer token
 ```
 
 ### Run
@@ -72,9 +72,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 curl http://localhost:8000/health
-```
-```json
-{"status": "ok"}
+# → {"status": "ok"}
 ```
 
 ### `POST /scan`
@@ -88,7 +86,7 @@ curl -X POST http://localhost:8000/scan \
   }'
 ```
 
-**Response (risk detected — real Bedrock AI):**
+**Response (risk detected):**
 ```json
 {
   "risk_score": 50,
@@ -99,8 +97,8 @@ curl -X POST http://localhost:8000/scan \
       "evidence": "`while True` loop without break/return/raise — will run indefinitely and exhaust CPU"
     }
   ],
-  "explanation": "In production, an infinite loop like `while True` can cause serious problems. The server will keep executing the loop forever, using up all the CPU. This means the server won't be able to handle other important tasks or requests from users, leading to service unavailability. Adding more servers doesn't help because the root problem is the infinite loop. This can lead to prolonged outages.",
-  "suggested_patch": "--- original.py\n+++ fixed.py\n@@ -4,6 +4,8 @@\n     while True:\n+        if counter >= 1000:\n+            break\n         time.sleep(1)\n         print(\"working...\")\n+        counter += 1"
+  "explanation": "This code contains a `while True` loop that runs forever without any exit condition. In production, this will pin one CPU core at 100%, causing health-check failures and eventual cascading timeouts across dependent services.",
+  "suggested_patch": "--- original\n+++ fixed\n@@ -4,3 +4,7 @@\n+counter = 0\n while True:\n+    if counter >= 1000:\n+        break\n     ...\n+    counter += 1"
 }
 ```
 
@@ -114,35 +112,25 @@ curl -X POST http://localhost:8000/scan \
 }
 ```
 
-> **Note:** `suggested_patch` is **always non-empty** when `risk_score > 0`. If Bedrock is unavailable, a deterministic static patch is generated.
+> **Note:** `suggested_patch` is **always non-empty** when `risk_score > 0`. If Bedrock is unavailable, a deterministic static patch is generated with a safety counter + break.
 
-## Test Results (10/10 ✅)
+## Test Results
 
-### Health Endpoint
+Passed on **5 curated test cases**:
 
-| Test | Description | HTTP | Status |
-|------|-------------|------|--------|
-| H1 | Standard GET | 200 | ✅ |
-| H2 | POST (wrong method) | 405 | ✅ |
-| H3 | PUT (wrong method) | 405 | ✅ |
-| H4 | Non-existent route | 404 | ✅ |
-| H5 | Custom Accept header | 200 | ✅ |
-
-### Scan Endpoint
-
-| Test | Description | Score | Status |
-|------|-------------|-------|--------|
-| S1 | Redis task processor — `while True` polling | 50 ⚠️ | ✅ Detected with AI explanation + patch |
-| S2 | Graceful shutdown server — `while True` + `break` | 0 | ✅ Correctly safe |
-| S3 | IoT sensor stream — `itertools.count()` | 50 ⚠️ | ✅ Detected with AI explanation + patch |
-| S4 | FastAPI CRUD app — no loops | 0 | ✅ No false positives |
-| S5 | Error cases (empty, >50KB, bad syntax, non-JSON, GET) | — | ✅ 422/400/405 |
-
-**0 false positives — 0 false negatives — Real Bedrock AI responses**
+| # | Scenario | Expected | Result |
+|---|----------|----------|--------|
+| 1 | Redis task processor — `while True` polling | Detected | ✅ risk_score: 50, non-empty patch |
+| 2 | Graceful shutdown — `while True` + `break` | Clean | ✅ risk_score: 0 |
+| 3 | IoT sensor — `itertools.count()` | Detected | ✅ risk_score: 50, non-empty patch |
+| 4 | FastAPI CRUD app — no loops | Clean | ✅ risk_score: 0 |
+| 5 | Error cases (empty, >50KB, bad syntax) | 400/422 | ✅ proper HTTP codes |
 
 ## AWS Deployment
 
-### IAM Policy Required
+### 1. IAM Policy — Confirm Access
+
+Attach this to your Lambda execution role **and verify** it's active:
 
 ```json
 {
@@ -157,7 +145,9 @@ curl -X POST http://localhost:8000/scan \
 }
 ```
 
-### Deploy
+**Confirm step:** Run `aws bedrock-runtime invoke-model --model-id anthropic.claude-3-5-sonnet-20241022-v2:0 --body '{}' /dev/null 2>&1` — you should see a validation error (not AccessDenied).
+
+### 2. Deploy
 
 ```bash
 npm install -g serverless
@@ -165,11 +155,23 @@ npm install serverless-python-requirements
 serverless deploy
 ```
 
-Output shows your API Gateway URL. Copy it and test:
+### 3. Live API URL
+
+After deployment, note the output URL:
+
+```
+endpoints:
+  ANY - https://<api-id>.execute-api.us-east-1.amazonaws.com/{proxy+}
+```
+
+Set this as your live API base URL:
 
 ```bash
-API_URL="https://your-api-id.execute-api.us-east-1.amazonaws.com"
+API_URL="https://<api-id>.execute-api.us-east-1.amazonaws.com"
+
 curl "$API_URL/health"
+# → {"status": "ok"}
+
 curl -X POST "$API_URL/scan" \
   -H "Content-Type: application/json" \
   -d '{"code": "while True:\n    print(\"forever\")"}'
@@ -177,27 +179,20 @@ curl -X POST "$API_URL/scan" \
 
 ## GitHub Actions — PR Scanning
 
-Automatically scans Python files changed in PRs and posts a risk report as a PR comment.
+Auto-scans changed `.py` files in Pull Requests and comments a risk summary.
 
 ### Setup
 
-1. Deploy the API (see above)
-2. Go to repo → **Settings → Secrets → Actions**
-3. Add secret: `BLASTSHIELD_API_URL` = your API Gateway URL
-4. Push — next PR with `.py` changes triggers the scan
+1. Deploy the API
+2. Repo → **Settings → Secrets → Actions** → add `BLASTSHIELD_API_URL`
+3. Push — next PR with `.py` changes triggers the scan
 
-### PR Comment Format
+### Workflow
 
-```
-🛡️ BlastShield Scan Report 🔴
-Files scanned: 3 | Average risk: 50/100
-
-⚠️ app/worker.py — Risk Score: 50/100
-Explanation: This while True loop will pin CPU at 100%...
-[Suggested Patch]
-
-✅ app/utils.py — Clean
-```
+`.github/workflows/pr-scan.yml` (~45 lines):
+- Triggers on `pull_request` with `.py` changes
+- Reads each changed file, POSTs to `/scan`
+- Comments ⚠️ or ✅ per file on the PR
 
 ## Detection Rules
 
@@ -205,10 +200,9 @@ Explanation: This while True loop will pin CPU at 100%...
 |---------|----------|---------|
 | `while True` without `break`/`return`/`raise` | ✅ | `while True: do_work()` |
 | `while True` WITH `break` | ❌ Safe | `while True: if done: break` |
-| `for x in itertools.count()` without `break` | ✅ | `for i in itertools.count(): print(i)` |
+| `for x in itertools.count()` without `break` | ✅ | `for i in itertools.count(): ...` |
 | `for x in itertools.repeat()` without `break` | ✅ | `for x in itertools.repeat(1): ...` |
-| `for x in iter(callable, sentinel)` without `break` | ✅ | `for x in iter(int, 1): ...` |
-| Normal `for` / `while` loops | ❌ Safe | `for i in range(100): ...` |
+| Normal loops | ❌ Safe | `for i in range(100): ...` |
 
 ## Fallback Behavior
 
@@ -217,7 +211,9 @@ Explanation: This while True loop will pin CPU at 100%...
 | Risk detection | ✅ Deterministic | ✅ Same |
 | Risk score | ✅ Deterministic | ✅ Same |
 | Explanation | ✅ AI-generated | ✅ Static fallback |
-| Patch | ✅ AI-generated diff | ✅ Static safety-counter diff |
+| Patch | ✅ AI-generated diff | ✅ Static counter+break diff |
+
+**Patch is NEVER empty when risks are detected.**
 
 ## Tech Stack
 
@@ -225,7 +221,7 @@ Explanation: This while True loop will pin CPU at 100%...
 |-----------|-----------|
 | Framework | FastAPI |
 | Parser | tree-sitter + tree-sitter-python |
-| AI | AWS Bedrock (Amazon Nova Lite) |
+| AI | AWS Bedrock (Claude 3.5 Sonnet v2) |
 | Runtime | AWS Lambda via Mangum |
 | Gateway | AWS HTTP API Gateway |
 | IaC | Serverless Framework |
